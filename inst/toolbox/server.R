@@ -129,6 +129,31 @@ choose_directory <- function(caption = "Select data directory") {
   }
 }
 
+# Validate an .nc URL
+# Parameters
+# x: a string containing a URL to validate whether it leads to a .nc file
+# Value
+# -1 if cannot connect to the URL
+# TRUE if URL appears to lead to a .nc file and FALSE if not.
+# Details
+# Some valid .nc URLs do not return the "application/x-netcdf" content-type.
+# An additional proxy check requiring a "text" content-type and ".nc" appearing in the URL
+# is used to ensure these URLs are considered valid.
+# However, this may lead to some invalid URLs returning TRUE, 
+# which will be detected later in the app.
+valid_nc_url <- function(x) {
+  con_type <- ""
+  try({
+    url_head <- httr::HEAD(x)
+    con_type <- httr::headers(url_head)[["content-type"]]
+  })
+  if (con_type == "") return(-1)
+  else if (con_type %in% c("application/x-netcdf", "application/x-netcdf4")) return(TRUE)
+  else {
+    return((startsWith(con_type, "text/plain") || startsWith(con_type, "text/html")) && grepl(".nc", x))
+  }
+}
+
 function(input, output, session) {
   #### Preparation and session set up ####
   # TODO: Setting the maximum request size. WARNING: NOT SURE WHAT'S A GOOD VALUE FOR THIS
@@ -141,6 +166,8 @@ function(input, output, session) {
     shinyjs::show("tarFileLocal")
     shinyjs::show("ncFileLocal")
     shinyjs::show("or_prepare")
+    shinyjs::show("ncURL")
+    shinyjs::show("or_prepare2")
     shinyjs::show("ncFileLocal_analyze")
     shinyjs::show("ncFileLocal_visualize")
     shinyjs::show("shapefileLocal")
@@ -151,6 +178,8 @@ function(input, output, session) {
     shinyjs::show("tarFileRemote")
     shinyjs::show("ncFileRemote")
     shinyjs::show("or_prepare")
+    shinyjs::show("ncURL")
+    shinyjs::show("or_prepare2")
     shinyjs::show("ncFileRemote_analyze")
     shinyjs::show("ncFileRemote_visualize")
     shinyjs::show("shapefileRemote")
@@ -196,6 +225,10 @@ function(input, output, session) {
   # Reactive value for nc-file-path.
   nc_path <- reactiveVal("")
   nc_path_action <- reactiveVal(0)
+  
+  # Reactive value for nc URL.
+  nc_url_path <- reactiveVal("")
+  nc_url_path_action <- reactiveVal(0)
   
   # Reactive value set after untaring files
   untarVals <- reactiveVal()
@@ -613,7 +646,42 @@ function(input, output, session) {
     }
     shinyjs::enable("ncFileLocal")
   }, ignoreInit = TRUE)
+  
+  # Prepare enter .nc file from URL button. (local and remote)
+  observeEvent(input$ncURL, {
+    shinyjs::hide(id = "panel_prepareGo")
+    shinyjs::show(id = "panel_prepare_nc_url", anim = TRUE, animType = "fade")
+  }, ignoreInit = TRUE)
+  
+  # Prepare check .nc URL button
+  observeEvent(input$nc_url_text, {
+    shinyjs::toggleState("nc_url_connect", input$nc_url_text != "")
+    output$nc_url_valid_message <- renderText({""})
+  }, ignoreInit = TRUE)
 
+  # Clear .nc validation text
+  observeEvent(input$nc_url_text, {
+    shinyjs::toggleState("nc_url_connect", input$nc_url_text != "")
+  }, ignoreInit = TRUE)
+  
+  # Set .nc validation text
+  observeEvent(input$nc_url_connect, {
+    valid_url <- valid_nc_url(input$nc_url_text)
+    output$nc_url_valid_message <- renderText({
+      if (valid_url == -1) {
+        mes <- "<span style='color:red'>Cannot access URL. Check the URL is correct"
+        if (isRunningLocally) {
+          mes <- paste(mes, "and your internet connection")
+        }
+        return(paste0(mes, " and try again.</span>"))
+      } else if (valid_url) {
+          return("<span style='color:green'>Valid NetCDF (.nc) URL</span>")
+        } else {
+          return("<span style='color:red'>URL does not appear to lead to a NetCDF (.nc) file. Please check the URL and try again.</span>")
+          }
+        })
+  }, ignoreInit = TRUE)
+  
   # Handling remote tar selection.
   shinyFiles::shinyFileChoose(input, 'tarFileRemote', session = session, roots = remoteVolume, filetypes=c('tar'))
     
@@ -806,9 +874,11 @@ function(input, output, session) {
     shinyjs::hide("panel_analyzeGo")
     shinyjs::hide("panel_visualizeGo")
     shinyjs::hide("panel_prepareInput1")
+    shinyjs::hide("panel_prepare_nc_url")
     shinyjs::hide("panel_prepareInput1Nc")
     shinyjs::hide("panel_prepareInput2")
     shinyjs::reset("panel_prepareInput1")
+    shinyjs::reset("panel_prepare_nc_url")
     shinyjs::reset("panel_prepareInput1Nc")
     shinyjs::reset("panel_prepareInput2")
     shinyjs::hide("spinner_prepare1")
@@ -837,9 +907,11 @@ function(input, output, session) {
     shinyjs::hide("panel_prepareGo")
     shinyjs::hide("panel_visualizeGo")
     shinyjs::hide("panel_prepareInput1")
+    shinyjs::hide("panel_prepare_nc_url")
     shinyjs::hide("panel_prepareInput1Nc")
     shinyjs::hide("panel_prepareInput2")
     shinyjs::reset("panel_prepareInput1")
+    shinyjs::reset("panel_prepare_nc_url")
     shinyjs::reset("panel_prepareInput1Nc")
     shinyjs::reset("panel_prepareInput2")
     shinyjs::hide("spinner_visualize")
@@ -868,9 +940,11 @@ function(input, output, session) {
     shinyjs::hide("panel_prepareGo")
     shinyjs::hide("panel_analyzeGo")
     shinyjs::hide("panel_prepareInput1")
+    shinyjs::hide("panel_prepare_nc_url")
     shinyjs::hide("panel_prepareInput1Nc")
     shinyjs::hide("panel_prepareInput2")
     shinyjs::reset("panel_prepareInput1")
+    shinyjs::reset("panel_prepare_nc_url")
     shinyjs::reset("panel_prepareInput1Nc")
     shinyjs::reset("panel_prepareInput2")
     shinyjs::hide("panel_analyze")

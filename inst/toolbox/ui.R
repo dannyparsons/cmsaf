@@ -123,7 +123,12 @@ fluidPage(
                                                                                          id = "ncFileRemote",
                                                                                          label = "Choose .nc-files...",
                                                                                          multiple = FALSE,
-                                                                                         title = "Please select .nc-files.")))
+                                                                                         title = "Please select .nc-files.")),
+                                            shinyjs::hidden(span(id = "or_prepare2", "or")),
+                                            shinyjs::hidden(actionButton("ncURL",
+                                                                         label = "Enter .nc file URL..."))
+                                            
+                                    )
                                     )),
                                    
                          shinyjs::hidden(
@@ -132,7 +137,22 @@ fluidPage(
                                     shinyjs::disabled(actionButton("untarAndUnzip",
                                                                    "Untar and unzip files.")),
                                     )),
-                         
+                         shinyjs::hidden(
+                           tags$div(id = "panel_prepare_nc_url",
+                                    textInput("nc_url_text", label = "Please enter a URL to a NetCDF (.nc) file", 
+                                              placeholder = "Enter URL...", width = "600px"),
+                                    shinyjs::disabled(actionButton("nc_url_connect", "Connect to URL")),
+                                    tags$br(),
+                                    tags$br(),
+                                    htmlOutput("nc_url_valid_message"),
+                                    tags$br(),
+                                    tags$br(),
+                                    tags$div(id = "nc_url_connect_download",
+                                             #shinyjs::hidden(actionButton("nc_url_connect", "Connect to .nc file.")),
+                                             #shinyjs::hidden(span(id = "or_prepare3", "or")),
+                                             shinyjs::hidden(actionButton("nc_url_download", "Download .nc file."))
+                                             )
+                                    )),
                          # date range .nc-files selection
                          shinyjs::hidden(
                            tags$div(id = "panel_prepareInput1Nc",
