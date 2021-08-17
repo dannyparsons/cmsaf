@@ -136,9 +136,10 @@ choose_directory <- function(caption = "Select data directory") {
 # -1 if cannot connect to the URL
 # TRUE if URL appears to lead to a .nc file and FALSE if not.
 # Details
+# It is suggested to use check only if ncdf4::nc_open() fails 
 # Some valid .nc URLs do not return the "application/x-netcdf" content-type.
-# An additional proxy check requiring a "text" content-type and ".nc" appearing in the URL
-# is used to ensure these URLs are considered valid.
+# An additional proxy check requiring a "text" or "application/octet-stream" content-type 
+# and ".nc" appearing in the URL is used to ensure these URLs are considered valid.
 # However, this may lead to some invalid URLs returning TRUE, 
 # which will be detected later in the app.
 valid_nc_url <- function(x) {
@@ -150,7 +151,79 @@ valid_nc_url <- function(x) {
   if (con_type == "") return(-1)
   else if (con_type %in% c("application/x-netcdf", "application/x-netcdf4")) return(TRUE)
   else {
-    return((startsWith(con_type, "text/plain") || startsWith(con_type, "text/html")) && grepl(".nc", x))
+    return((startsWith(con_type, "text/plain") || startsWith(con_type, "text/html") || con_type == "application/octet-stream") && grepl(".nc", x))
+  }
+}
+
+# A copy of cmsafops::ncinfo() but modified 
+# to allow the input to be an nc object created by nc_open().
+# This is useful for URL inputs to avoid connecting to the URL again.
+ncinfo_from_nc <- function (nc, info = "s", verbose = FALSE) {
+  TIME_NAMES <- cmsafops:::TIME_NAMES
+  UNDEFINED <- cmsafops:::UNDEFINED
+  ATTR_NAMES <- cmsafops:::ATTR_NAMES
+
+  t_name <- TIME_NAMES$DEFAULT
+  t_units <- UNDEFINED
+  nc_in <- nc
+  dimnames <- names(nc_in$dim)
+  varnames <- names(nc_in$var)
+  if (info == "l") {
+    cat(utils::str(nc_in), "\n")
+    return(invisible(nc_in))
+  }
+  if (info == "m") {
+    print(nc_in)
+  }
+  if (info == "s") {
+    cat("The file:", nc_in$filename, "contains:", 
+        "\n")
+    if (length(varnames) == 1) {
+      cat("\n", "Variable:", sep = "", 
+          "\n")
+      cat(varnames[1], "\n")
+    }
+    else {
+      cat("\n", "Variables:", sep = "", 
+          "\n")
+      for (i in seq_along(varnames)) {
+        cat(varnames[i], "\n")
+      }
+    }
+    for (i in seq_along(dimnames)) {
+      sn <- ncdf4::ncatt_get(nc_in, dimnames[i], ATTR_NAMES$STANDARD_NAME)
+      if (length(sn) > 0) {
+        sn <- sn$value
+        if (sn == TIME_NAMES$DEFAULT) 
+          t_name <- dimnames[i]
+      }
+    }
+    cat("\n", "With following dimensions:", sep = "", 
+        "\n")
+    for (i in seq_along(dimnames)) {
+      if (dimnames[i] == t_name) {
+        for (j in seq_along(dimnames)) {
+          if (t_name %in% dimnames) {
+            attnames <- names(nc_in$dim[[i]])
+            if (ATTR_NAMES$UNITS %in% attnames) {
+              t_units <- ncdf4::ncatt_get(nc_in, t_name, ATTR_NAMES$UNITS)$value
+            }
+          }
+        }
+        time1 <- ncdf4::ncvar_get(nc_in, TIME_NAMES$DEFAULT)
+        date.time <- as.Date(cmsafops::get_time(t_units, time1))
+        cat("time with length ", length(time1), 
+            " (range ", as.character(min(date.time)), 
+            " to ", as.character(max(date.time)), 
+            ")", sep = "", "\n")
+      }
+      else {
+        cat(dimnames[i], " with length ", nc_in$dim[[i]]$len, 
+            " (range ", min(nc_in$dim[[i]]$vals), 
+            " to ", max(nc_in$dim[[i]]$vals), ")", 
+            sep = "", "\n")
+      }
+    }
   }
 }
 
@@ -174,6 +247,7 @@ function(input, output, session) {
 
     # Let user be able to modify the output directory.
     shinyjs::show("modify_userDir")
+    updateActionButton(inputId = "nc_url_download", label = "Download .nc file")
   } else {
     shinyjs::show("tarFileRemote")
     shinyjs::show("ncFileRemote")
@@ -186,6 +260,8 @@ function(input, output, session) {
 
     # Let user be able to download the output directory.
     shinyjs::show("downloader")
+    
+    updateActionButton(inputId = "nc_url_download", label = "Download to server")
   }
 
   dir.create(config_directory, showWarnings = FALSE)
@@ -201,7 +277,14 @@ function(input, output, session) {
   userDir <<- ""
   outputDir <<- ""
   action_userDir_change <- reactiveVal(0)
-
+  
+  # Is outputFilepath() a URL path?
+  output_nc_is_url <<- FALSE
+  # Is nc_path_analyze() a URL path?
+  analyze_nc_is_url <<- FALSE
+  # Is nc_path_vizualize() a URL path?
+  visualize_nc_is_url <<- FALSE
+  
   # 'Unique' session name
   sessionName <- paste0(session$user, format(Sys.time(), "%Y%m%d%H%M%S", tz = "UTC"))
   videoDir <- reactiveVal(file.path(getwd(), "www", "video"))
@@ -657,6 +740,8 @@ function(input, output, session) {
   observeEvent(input$nc_url_text, {
     shinyjs::toggleState("nc_url_connect", input$nc_url_text != "")
     output$nc_url_valid_message <- renderText({""})
+    shinyjs::hide(id = "nc_url_file_info")
+    shinyjs::hide(id = "nc_url_download")
   }, ignoreInit = TRUE)
 
   # Clear .nc validation text
@@ -664,9 +749,12 @@ function(input, output, session) {
     shinyjs::toggleState("nc_url_connect", input$nc_url_text != "")
   }, ignoreInit = TRUE)
   
-  # Set .nc validation text
+  # Set .nc URL validation and connection text
   observeEvent(input$nc_url_connect, {
-    valid_url <- valid_nc_url(input$nc_url_text)
+    nc <- tryCatch(ncdf4::nc_open(input$nc_url_text),
+                   error = function(e) return(NULL))
+    if (!is.null(nc)) valid_url <- TRUE
+    else valid_url <- valid_nc_url(input$nc_url_text)
     output$nc_url_valid_message <- renderText({
       if (valid_url == -1) {
         mes <- "<span style='color:red'>Cannot access URL. Check the URL is correct"
@@ -675,12 +763,84 @@ function(input, output, session) {
         }
         return(paste0(mes, " and try again.</span>"))
       } else if (valid_url) {
-          return("<span style='color:green'>Valid NetCDF (.nc) URL</span>")
-        } else {
-          return("<span style='color:red'>URL does not appear to lead to a NetCDF (.nc) file. Please check the URL and try again.</span>")
-          }
+        return("<span style='color:green'>Valid NetCDF (.nc) URL</span>")
+      } else {
+        return("<span style='color:red'>URL does not appear to lead to a NetCDF (.nc) file. Please check the URL and try again.</span>")
+      }
+    })
+    if (valid_url) {
+      if (!is.null(nc)) {
+        output$ncurlShortInfo <- renderPrint({
+          ncinfo_from_nc(nc)
         })
+        shinyjs::show(id = "nc_url_file_info")
+        shinyjs::show(id = "nc_url_analyze")
+        shinyjs::hide(id = "nc_url_download_analyze")
+        shinyjs::show(id = "nc_url_visualize")
+        shinyjs::hide(id = "nc_url_download_visualize")
+        shinyjs::hide(id = "nc_url_download")
+      } else {
+        shinyjs::hide(id = "nc_url_file_info")
+        shinyjs::show(id = "nc_url_download")
+      }
+    }
   }, ignoreInit = TRUE)
+  
+  # Download .nc URL
+  observeEvent(input$nc_url_download, {
+    b <- try(basename(input$nc_url_text))
+    if (class(b) == "try-error") b <- "url_download"
+    url_file <- file.path(userDir, paste0(format(Sys.time(), "%Y%m%d_%H%M%S_"), b))
+    if (!endsWith(url_file, ".nc")) url_file <- paste0(url_file, ".nc")
+    res <- try(utils::download.file(input$nc_url_text, url_file, method = "auto", mode = "wb"))
+    
+    if (class(res) != "try-error" && res == 0) {
+      outputFilepath(url_file)
+      output_nc_is_url <<- FALSE
+      output$ncurlShortInfo <- renderPrint({
+        cmsafops::ncinfo(url_file)
+      })
+      shinyjs::show(id = "nc_url_file_info")
+      shinyjs::hide(id = "nc_url_analyze")
+      shinyjs::show(id = "nc_url_download_analyze")
+      shinyjs::hide(id = "nc_url_visualize")
+      shinyjs::show(id = "nc_url_download_visualize")
+    }
+  },
+  ignoreInit = TRUE
+  )
+  
+  # Prepare .nc URL for analyze
+  observeEvent(input$nc_url_analyze, {
+    outputFilepath(input$nc_url_text)
+    output_nc_is_url <<- TRUE
+    resetToAnalyzePanel()
+  },
+  ignoreInit = TRUE
+  )
+
+  # Prepare .nc URL for visualize
+  observeEvent(input$nc_url_visualize, {
+    outputFilepath(input$nc_url_text)
+    output_nc_is_url <<- TRUE
+    resetToVisualizePanel()
+  },
+  ignoreInit = TRUE
+  )
+  
+  # Prepare downloaded .nc URL for analyze
+  observeEvent(input$nc_url_download_analyze, {
+    resetToAnalyzePanel()
+  },
+  ignoreInit = TRUE
+  )
+  
+  # Prepare downloaded .nc URL for visualize
+  observeEvent(input$nc_url_download_visualize, {
+    resetToVisualizePanel()
+  },
+  ignoreInit = TRUE
+  )
   
   # Handling remote tar selection.
   shinyFiles::shinyFileChoose(input, 'tarFileRemote', session = session, roots = remoteVolume, filetypes=c('tar'))
@@ -744,7 +904,8 @@ function(input, output, session) {
   # If user chooses to take generated nc file update nc_path_analyze. (output file)
   observeEvent(input$useOutputFile_analyze, {
     nc_path_analyze(outputFilepath())
-    if (!endsWith(nc_path_analyze(), ".nc")) {
+    if (output_nc_is_url) analyze_nc_is_url <<- TRUE
+    if (!endsWith(nc_path_analyze(), ".nc") && !analyze_nc_is_url) {
       isolate(nc_path_analyze(""))
       wrong_file_modal(".nc")
     } else {
@@ -788,7 +949,8 @@ function(input, output, session) {
   # If user chooses to take generated nc file update nc_path_visualize. (output file)
   observeEvent(input$useOutputFile_visualize, {
     nc_path_visualize(outputFilepath())
-    if (!endsWith(nc_path_visualize(), ".nc")) {
+    if (output_nc_is_url) visualize_nc_is_url <<- TRUE
+    if (!endsWith(nc_path_visualize(), ".nc") && !visualize_nc_is_url) {
       isolate(nc_path_visualize(""))
       wrong_file_modal(".nc")
     } else {
@@ -2216,14 +2378,14 @@ function(input, output, session) {
   # If a file has been generated let user decide if they want to continue with
   # this file or select another file.
   observeEvent(outputFilepath(), {
-    if (endsWith(outputFilepath(), ".nc")) {
+    if (endsWith(outputFilepath(), ".nc") || output_nc_is_url) {
       output$ncFile_analyze <- renderUI({
         tags$pre("We prepared the following .nc file for you: ",
-                 basename(outputFilepath()))
+                 if(output_nc_is_url) outputFilepath() else basename(outputFilepath()))
       })
       output$ncFile_visualize <- renderUI({
         tags$pre("We prepared the following .nc file for you: ",
-                 basename(outputFilepath()))
+                 if(output_nc_is_url) outputFilepath() else basename(outputFilepath()))
       })
       shinyjs::show("ncFile_analyze")
       shinyjs::show("useOutputFile_analyze")
@@ -2247,7 +2409,7 @@ function(input, output, session) {
     req(nc_path_analyze())
 
     # If wrong format alert and stop.
-    if (!endsWith(nc_path_analyze(), ".nc")) {
+    if (!endsWith(nc_path_analyze(), ".nc") && !analyze_nc_is_url) {
       isolate(nc_path_analyze(""))
       showModal(modalDialog(
         h4("Wrong file format. Please choose .nc file to continue."),
@@ -3557,6 +3719,7 @@ function(input, output, session) {
                               "warming_stripes_plot", "time_series_plot", "trend_plot")
     
     # Get package and function
+    print(operatorInput_value())
     if (operatorInput_value() %in% climate_analysis_ops) {
       fun <- get("monitor_climate", asNamespace("cmsafvis"))
     } else if(operatorInput_value() %in% operatorOptionsDict[["compare_data"]]) {
@@ -3571,7 +3734,7 @@ function(input, output, session) {
     else {
       fun <- get(operatorInput_value(), asNamespace("cmsafops"))
     }
-    
+    print(argumentList)
     if((endsWith(infile2_analyze_value(), ".nc")) || (infile2_analyze_value() == "")) {   # if second file is a nc-file or no second file is available
       res <- try(do.call(fun, argumentList))
     } else {

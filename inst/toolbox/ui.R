@@ -145,12 +145,20 @@ fluidPage(
                                     tags$br(),
                                     tags$br(),
                                     htmlOutput("nc_url_valid_message"),
-                                    tags$br(),
-                                    tags$br(),
+                                    shinyjs::hidden(actionButton("nc_url_download", "")),
+                                    shinyjs::hidden(
+                                      tags$div(id = "nc_url_file_info",
+                                               h3("Short File Information"),
+                                               verbatimTextOutput("ncurlShortInfo"),
+                                               shinyjs::hidden(actionButton("nc_url_analyze", "Analyze this file")),
+                                               shinyjs::hidden(actionButton("nc_url_download_analyze", "Analyze this file")),
+                                               span(id = "or_prepare4", "or"),
+                                               shinyjs::hidden(actionButton("nc_url_visualize", "Visualise this file")),
+                                               shinyjs::hidden(actionButton("nc_url_download_visualize", "Visualise this file")))
+                           ),
                                     tags$div(id = "nc_url_connect_download",
                                              #shinyjs::hidden(actionButton("nc_url_connect", "Connect to .nc file.")),
                                              #shinyjs::hidden(span(id = "or_prepare3", "or")),
-                                             shinyjs::hidden(actionButton("nc_url_download", "Download .nc file."))
                                              )
                                     )),
                          # date range .nc-files selection
