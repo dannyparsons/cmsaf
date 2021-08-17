@@ -147,10 +147,17 @@ valid_nc_url <- function(x) {
   try({
     url_head <- httr::HEAD(x)
     con_type <- httr::headers(url_head)[["content-type"]]
+    stat_code <- as.character(httr::status_code(url_head))
   })
-  if (con_type == "") return(-1)
+  # If the content type is blank or the status code begins with 4 e.g. 404 
+  # then it's likely the URL is invalid.
+  if (con_type == "" || startsWith(stat_code, "4")) return(-1)
   else if (con_type %in% c("application/x-netcdf", "application/x-netcdf4")) return(TRUE)
   else {
+    # Many URL which lead to NetCDF file e.g. links from THREDDS servers,
+    # do not have the NetCDF content type, hence an additional check is needed.
+    # These often have a "text" content type.
+    # Some NetCDF files are also coded as "application/octet-stream" which is like "unknown" or "generic"
     return((startsWith(con_type, "text/plain") || startsWith(con_type, "text/html") || con_type == "application/octet-stream") && grepl(".nc", x))
   }
 }
@@ -751,6 +758,8 @@ function(input, output, session) {
   
   # Set .nc URL validation and connection text
   observeEvent(input$nc_url_connect, {
+    shinyjs::disable("panel_prepare_nc_url")
+    shinyjs::show("spinner_prepare_nc_url_connect", anim = TRUE, animType = "fade")
     nc <- tryCatch(ncdf4::nc_open(input$nc_url_text),
                    error = function(e) return(NULL))
     if (!is.null(nc)) valid_url <- TRUE
@@ -768,7 +777,7 @@ function(input, output, session) {
         return("<span style='color:red'>URL does not appear to lead to a NetCDF (.nc) file. Please check the URL and try again.</span>")
       }
     })
-    if (valid_url) {
+    if (isTRUE(valid_url)) {
       if (!is.null(nc)) {
         output$ncurlShortInfo <- renderPrint({
           ncinfo_from_nc(nc)
@@ -784,10 +793,14 @@ function(input, output, session) {
         shinyjs::show(id = "nc_url_download")
       }
     }
+    shinyjs::hide("spinner_prepare_nc_url_connect")
+    shinyjs::enable("panel_prepare_nc_url")
   }, ignoreInit = TRUE)
   
   # Download .nc URL
   observeEvent(input$nc_url_download, {
+    shinyjs::disable("panel_prepare_nc_url")
+    shinyjs::show("spinner_prepare_nc_url_download", anim = TRUE, animType = "fade")
     b <- try(basename(input$nc_url_text))
     if (class(b) == "try-error") b <- "url_download"
     url_file <- file.path(userDir, paste0(format(Sys.time(), "%Y%m%d_%H%M%S_"), b))
@@ -806,6 +819,8 @@ function(input, output, session) {
       shinyjs::hide(id = "nc_url_visualize")
       shinyjs::show(id = "nc_url_download_visualize")
     }
+    shinyjs::hide("spinner_prepare_nc_url_download")
+    shinyjs::enable("panel_prepare_nc_url")
   },
   ignoreInit = TRUE
   )
