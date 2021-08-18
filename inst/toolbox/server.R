@@ -285,6 +285,10 @@ function(input, output, session) {
   outputDir <<- ""
   action_userDir_change <- reactiveVal(0)
   
+  # Number of remote files created by the user.
+  # This is used to inform the user of any created files before exiting.
+  n_remote_files <- reactiveVal(0)
+  
   # Is outputFilepath() a URL path?
   output_nc_is_url <<- FALSE
   # Is nc_path_analyze() a URL path?
@@ -293,7 +297,9 @@ function(input, output, session) {
   visualize_nc_is_url <<- FALSE
   
   # 'Unique' session name
-  sessionName <- paste0(session$user, format(Sys.time(), "%Y%m%d%H%M%S", tz = "UTC"))
+  # session$token is the recommended unique identifier
+  # timestamps should be avoided in case of multiple users accessing instantaneously.
+  sessionName <- session$token
   videoDir <- reactiveVal(file.path(getwd(), "www", "video"))
   observe({
     if (dir.exists(videoDir())) {
@@ -547,7 +553,9 @@ function(input, output, session) {
     outputDir <<- userDir
 
     dirFlag <- FALSE
-    # If by any chance this directroy has existed give warning message.
+    # If by any chance this directory has existed give warning message.
+    # This should now never happen through use of session$token
+    # but sensible to keep as a check.
     if (dir.exists(userDir)) {
       dirFlag <- TRUE
       warning(paste0("User directory: ", userDir, " already exists. APP WILL STOP!"))
@@ -2375,7 +2383,9 @@ function(input, output, session) {
   })
 
   # Download the created session directory.
-  output$download <- downloadHandler(
+  # session_dir_download_handler is called in two places
+  # For output$download (main button) and output$downloader_modal (button in modal)
+  session_dir_download_handler <- downloadHandler(
     filename = function() {
       paste0(sessionName, ".tar")
     },
@@ -2388,7 +2398,8 @@ function(input, output, session) {
     },
     contentType = "application/x-tar"
   )
-
+  output$download <- session_dir_download_handler
+  
   #### ANALYZING ####
   # If a file has been generated let user decide if they want to continue with
   # this file or select another file.
@@ -6586,9 +6597,37 @@ function(input, output, session) {
 
   #### Destructors ####
   # Stop app on exit button.
+  
+  # This modal is called if the app is running remotely and there exists output files
+  # to warn the user that files will be lost after exiting.
+  confirm_exit_modal <- modalDialog(
+    p("You have files on the server which will be lost when you exit."),
+    downloadButton("downloader_modal", "Download the session files."),
+    title = "Are you sure you want to exit?",
+    footer = tagList(actionButton("exit_app", "Exit App"),
+                     modalButton("Cancel")
+                     ),
+    easyClose = TRUE
+    )
+  output$downloader_modal <- session_dir_download_handler
+
   observeEvent(input$exit, {
-    stopApp(returnValue = invisible(99))
+    n_remote_files(length(list.files(userDir, recursive = TRUE)))
+    if (!isRunningLocally && n_remote_files() == 0) {
+      showModal(confirm_exit_modal)
+    }
+    else {
+      stop_toolbox()
+    }
   })
+  
+  observeEvent(input$exit_app, {
+    stop_toolbox()
+  })
+  
+  stop_toolbox <- function() {
+    stopApp(returnValue = invisible(99))
+  }
 
   # After app is closed do cleanup. (Only if directory hasn't existed before session.)
   session$onSessionEnded(function() {
