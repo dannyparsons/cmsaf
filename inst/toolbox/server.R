@@ -809,26 +809,40 @@ function(input, output, session) {
   observeEvent(input$nc_url_download, {
     shinyjs::disable("panel_prepare_nc_url")
     shinyjs::show("spinner_prepare_nc_url_download", anim = TRUE, animType = "fade")
+    # Try to get the base name from the URL
     b <- try(basename(input$nc_url_text))
+    # However, some URLs are too long e.g. from THREDDS servers, and don't return a
+    # base name. Hence, a default name "url_download" is used instead.
+    # This could be replaced by something else derived from the URL
+    # e.g. first and last few characters?
     if (class(b) == "try-error") b <- "url_download"
+    # The timestamp is appended to the file name to ensure the file is unique.
     url_file <- file.path(userDir, paste0(format(Sys.time(), "%Y%m%d_%H%M%S_"), b))
+    # The base name may not finish with ".nc" so this needs to be added.
     if (!endsWith(url_file, ".nc")) url_file <- paste0(url_file, ".nc")
     res <- try(utils::download.file(input$nc_url_text, url_file, method = "auto", mode = "wb"))
     
+    shinyjs::hide("spinner_prepare_nc_url_download")
+    shinyjs::enable("panel_prepare_nc_url")
     if (class(res) != "try-error" && res == 0) {
       outputFilepath(url_file)
       output_nc_is_url <<- FALSE
       output$ncurlShortInfo <- renderPrint({
         cmsafops::ncinfo(url_file)
       })
+      
       shinyjs::show(id = "nc_url_file_info")
       shinyjs::hide(id = "nc_url_analyze")
       shinyjs::show(id = "nc_url_download_analyze")
       shinyjs::hide(id = "nc_url_visualize")
       shinyjs::show(id = "nc_url_download_visualize")
+    } else {
+      showModal(modalDialog(
+        h4("Something went wrong while downloading the file. Please try again or choose another URL."),
+        title = "Error.",
+        size = "l"
+      ))
     }
-    shinyjs::hide("spinner_prepare_nc_url_download")
-    shinyjs::enable("panel_prepare_nc_url")
   },
   ignoreInit = TRUE
   )
@@ -6613,7 +6627,7 @@ function(input, output, session) {
 
   observeEvent(input$exit, {
     n_remote_files(length(list.files(userDir, recursive = TRUE)))
-    if (!isRunningLocally && n_remote_files() == 0) {
+    if (!isRunningLocally && n_remote_files() > 0) {
       showModal(confirm_exit_modal)
     }
     else {
