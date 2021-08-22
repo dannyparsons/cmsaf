@@ -289,13 +289,6 @@ function(input, output, session) {
   # This is used to inform the user of any created files before exiting.
   n_remote_files <- reactiveVal(0)
   
-  # Is outputFilepath() a URL path?
-  output_nc_is_url <<- FALSE
-  # Is nc_path_analyze() a URL path?
-  analyze_nc_is_url <<- FALSE
-  # Is nc_path_vizualize() a URL path?
-  visualize_nc_is_url <<- FALSE
-  
   # 'Unique' session name
   # session$token is the recommended unique identifier
   # timestamps should be avoided in case of multiple users accessing instantaneously.
@@ -356,11 +349,18 @@ function(input, output, session) {
 
   # Reactive value for output file path (nc file)
   outputFilepath <- reactiveVal()
+  
+  # Reactive value for output file nc object
+  # An alternative to outputFilepath(), particularly for URL paths
+  # to increase efficiency by avoiding repeated calls ncdf4::nc_open() on the URL
+  outputFilenc <- reactiveVal(NULL)
 
   # Reactive value for the nc file to be used in analyze. (update action if file stays the same on new upload)
   nc_path_analyze <- reactiveVal()
   nc_path_analyze_action <- reactiveVal(0)
-
+  # Similar to outputFilenc(), reactive value for the nc object to be used in analyze
+  nc_object_analyze <- reactiveVal(NULL)
+  
   # Reactive value for which variable is used
   var_used <- reactiveVal()
 
@@ -403,6 +403,8 @@ function(input, output, session) {
   nc_path_visualize <- reactiveVal()
   nc_path_visualize_2 <- reactiveVal("")
   actionVisualize <- reactiveVal(0)
+  # Similar to outputFilenc(), reactive value for the nc object to be used in visualize
+  nc_object_visualize <- reactiveVal(NULL)
   
   # Reactive value for the csv / RData data to be used in visualize (compare data)
   station_data_compare <- reactiveVal(0)
@@ -850,8 +852,13 @@ function(input, output, session) {
   # Prepare .nc URL for analyze
   observeEvent(input$nc_url_analyze, {
     outputFilepath(input$nc_url_text)
-    output_nc_is_url <<- TRUE
-    resetToAnalyzePanel()
+    nc <- try(ncdf4::nc_open(input$nc_url_analyze))
+    if (class(nc) != "try-error") {
+      outputFilenc(nc)
+      resetToAnalyzePanel()
+    } else {
+      wrong_file_modal(".nc")
+    }
   },
   ignoreInit = TRUE
   )
@@ -938,11 +945,13 @@ function(input, output, session) {
     }
   })
 
-  # If user chooses to take generated nc file update nc_path_analyze. (output file)
+  # If user chooses to take generated nc file update nc_path_analyze and nc_object_analyze. (output file)
   observeEvent(input$useOutputFile_analyze, {
     nc_path_analyze(outputFilepath())
-    if (output_nc_is_url) analyze_nc_is_url <<- TRUE
-    if (!endsWith(nc_path_analyze(), ".nc") && !analyze_nc_is_url) {
+    # Set the nc object if it is not NULL
+    if (!is.null(outputFilenc())) nc_object_analyze(outputFilepath())
+    else isolate(nc_object_analyze(NULL))
+    if (!endsWith(nc_path_analyze(), ".nc") && is.null(nc_object_analyze())) {
       isolate(nc_path_analyze(""))
       wrong_file_modal(".nc")
     } else {
@@ -2449,7 +2458,7 @@ function(input, output, session) {
     req(nc_path_analyze())
 
     # If wrong format alert and stop.
-    if (!endsWith(nc_path_analyze(), ".nc") && !analyze_nc_is_url) {
+    if (!endsWith(nc_path_analyze(), ".nc") && is.null(nc_object_analyze())) {
       isolate(nc_path_analyze(""))
       showModal(modalDialog(
         h4("Wrong file format. Please choose .nc file to continue."),
@@ -2458,10 +2467,11 @@ function(input, output, session) {
       ))
     } else {
       # Getting variable(s)
-      id <- ncdf4::nc_open(nc_path_analyze())
+      if (!is.null(nc_object_analyze())) id <- nc_object_analyze()
+      else id <- ncdf4::nc_open(nc_path_analyze())
       vn <- names(id$var)
       dn <- names(id$dim)
-      ncdf4::nc_close(id)
+      if (is.null(nc_object_analyze())) ncdf4::nc_close(id)
 
       if (!("time" %in% dn)) {
         showModal(modalDialog(
@@ -2612,10 +2622,11 @@ function(input, output, session) {
 
     # Render some UI elements dependent on infile and chosen operator
     if (operatorInput_value() == "selyear") {
-      nc <- ncdf4::nc_open(isolate(nc_path_analyze()))
+      if (!is.null(nc_object_analyze())) nc <- nc_object_analyze()
+      else nc <- ncdf4::nc_open(isolate(nc_path_analyze()))
       time_info <- cmsafops:::get_date_time(ncdf4::ncvar_get(nc, "time"), ncdf4::ncatt_get(nc, "time", "units")$value)
       years2 <- time_info$years
-      ncdf4::nc_close(nc)
+      if (is.null(nc_object_analyze())) ncdf4::nc_close(nc)
 
       output$years_to_select <- renderUI({
         selectInput("years",
@@ -2627,9 +2638,10 @@ function(input, output, session) {
     }
 
     if (operatorInput_value() %in% c("selperiod", "extract.period", climate_analysis_ops)) {
-      nc <- ncdf4::nc_open(isolate(nc_path_analyze()))
+      if (!is.null(nc_object_analyze())) nc <- nc_object_analyze()
+      else nc <- ncdf4::nc_open(isolate(nc_path_analyze()))
       date_time <- as.Date(cmsafops::get_time(ncdf4::ncatt_get(nc, "time", "units")$value, ncdf4::ncvar_get(nc, "time")))
-      ncdf4::nc_close(nc)
+      if (is.null(nc_object_analyze())) ncdf4::nc_close(nc)
 
       if (operatorInput_value() %in% c("selperiod", "extract.period")) {
         output$dateRange_to_select <- renderUI({
@@ -2686,10 +2698,11 @@ function(input, output, session) {
     }
 
     if (operatorInput_value() == "seltime") {
-      nc <- ncdf4::nc_open(isolate(nc_path_analyze()))
+      if (!is.null(nc_object_analyze())) nc <- nc_object_analyze()
+      else nc <- ncdf4::nc_open(isolate(nc_path_analyze()))
       time_info <- cmsafops:::get_date_time(ncdf4::ncvar_get(nc, "time"), ncdf4::ncatt_get(nc, "time", "units")$value)
       times2 <- time_info$times
-      ncdf4::nc_close(nc)
+      if (is.null(nc_object_analyze())) ncdf4::nc_close(nc)
 
       output$times_to_select <- renderUI({
         selectInput("times",
@@ -2706,7 +2719,7 @@ function(input, output, session) {
       # lat <- ncdf4::ncvar_get(nc, "lat")
       # ncdf4::nc_close(nc)
       
-      file_data <- cmsafops::read_file(isolate(nc_path_analyze()), input$usedVariable)
+      file_data <- cmsafops::read_file(isolate(nc_path_analyze()), input$usedVariable, nc = nc_object_analyze())
       lon <- file_data$dimension_data$x
       lat <- file_data$dimension_data$y
       
@@ -2735,7 +2748,7 @@ function(input, output, session) {
       # lat <- ncdf4::ncvar_get(nc, "lat")
       # ncdf4::nc_close(nc)
       
-      file_data <- cmsafops::read_file(isolate(nc_path_analyze()), input$usedVariable)
+      file_data <- cmsafops::read_file(isolate(nc_path_analyze()), input$usedVariable, nc = nc_object_analyze())
       lon <- file_data$dimension_data$x
       lat <- file_data$dimension_data$y
 
@@ -2940,7 +2953,7 @@ function(input, output, session) {
 
     output$ncShortInfo <- renderPrint({
       req(nc_path_analyze())
-      cmsafops::ncinfo(nc_path_analyze())
+      cmsafops::ncinfo(nc_path_analyze(), nc = nc_object_analyze())
     })
 
     if (nrow(operatorDataFrame) == 0) {
@@ -2984,6 +2997,7 @@ function(input, output, session) {
                         )
     } else {
       shinyjs::hide("attach_warning")
+      # TODO Can the idea of attaching be thought of when an nc object is used?
       nc <- ncdf4::nc_open(isolate(nc_path_analyze()))
       date_time <- as.Date(cmsafops::get_time(ncdf4::ncatt_get(nc, "time", "units")$value, ncdf4::ncvar_get(nc, "time")))
       ncdf4::nc_close(nc)
@@ -3057,14 +3071,16 @@ function(input, output, session) {
                            infile = nc_path_analyze(),
                            outfile = newOutfile,
                            nc34 = input$format,
-                           overwrite = TRUE)
+                           overwrite = TRUE,
+                           nc = nc_object_analyze())
     } else if (currentOperatorOption() == "constant") {
       argumentList <- list(var = input$usedVariable,
                            const = input$constant,
                            infile = nc_path_analyze(),
                            outfile = newOutfile,
                            nc34 = input$format,
-                           overwrite = TRUE)
+                           overwrite = TRUE,
+                           nc = nc_object_analyze())
     } else if (currentOperatorOption() == "region") {
       # Sellonlatbox
       argumentList <- list(var = input$usedVariable,
@@ -3075,7 +3091,8 @@ function(input, output, session) {
                            lat1 = input$latRegionSlider[1],
                            lat2 = input$latRegionSlider[2],
                            nc34 = input$format,
-                           overwrite = TRUE)
+                           overwrite = TRUE,
+                           nc = nc_object_analyze())
     } else if (currentOperatorOption() == "point") {
       if (operatorInput_value() == "selpoint") {
         argumentList <- list(var = input$usedVariable,
@@ -3084,7 +3101,8 @@ function(input, output, session) {
                              lon1 = input$lonPoint,
                              lat1 = input$latPoint,
                              nc34 = input$format,
-                             overwrite = TRUE)
+                             overwrite = TRUE,
+                             nc = nc_object_analyze())
       } else {
         newOutfile <- nc_path_analyze()
         format <- "nc"
@@ -3099,7 +3117,8 @@ function(input, output, session) {
                              lon1 = as.numeric(chosen_lonPoints()),
                              lat1 = as.numeric(chosen_latPoints()),
                              nc34 = nc34,
-                             format = format)
+                             format = format,
+                             nc = nc_object_analyze())
         chosen_lonPoints(c())
         chosen_latPoints(c())
       }
@@ -3110,7 +3129,8 @@ function(input, output, session) {
                            infile = nc_path_analyze(),
                            outfile = newOutfile,
                            nc34 = input$format,
-                           overwrite = TRUE)
+                           overwrite = TRUE,
+                           nc = nc_object_analyze())
     } else if (currentOperatorOption() == "useFastTrend") {
       trendValue <- 1
       if (!input$useFastTrend) {
@@ -3121,14 +3141,16 @@ function(input, output, session) {
                            outfile = newOutfile,
                            option = trendValue,
                            nc34 = input$format,
-                           overwrite = TRUE)
+                           overwrite = TRUE,
+                           nc = nc_object_analyze())
     } else if (currentOperatorOption() == "percentile") {
       argumentList <- list(var = input$usedVariable,
                            p = input$percentile,
                            infile = nc_path_analyze(),
                            outfile = newOutfile,
                            nc34 = input$format,
-                           overwrite = TRUE)
+                           overwrite = TRUE,
+                           nc = nc_object_analyze())
     } else if (currentOperatorOption() == "gridbox") {
       argumentList <- list(var = input$usedVariable,
                            lonGrid = input$gridbox_lon,
@@ -3136,21 +3158,24 @@ function(input, output, session) {
                            infile = nc_path_analyze(),
                            outfile = newOutfile,
                            nc34 = input$format,
-                           overwrite = TRUE)
+                           overwrite = TRUE,
+                           nc = nc_object_analyze())
     } else if (currentOperatorOption() == "running") {
       argumentList <- list(var = input$usedVariable,
                            nts = input$running_nts,
                            infile = nc_path_analyze(),
                            outfile = newOutfile,
                            nc34 = input$format,
-                           overwrite = TRUE)
+                           overwrite = TRUE,
+                           nc = nc_object_analyze())
     } else if (currentOperatorOption() == "timeRange") {
       argumentList <- list(var = input$usedVariable,
                            nts = input$timeRange_nts,
                            infile = nc_path_analyze(),
                            outfile = newOutfile,
                            nc34 = input$format,
-                           overwrite = TRUE)
+                           overwrite = TRUE,
+                           nc = nc_object_analyze())
     } else if (currentOperatorOption() == "months") {
       monthList <- which(c("January", "February", "March", "April", "May",
                            "June", "July", "August", "September", "October",
@@ -3161,21 +3186,24 @@ function(input, output, session) {
                            infile = nc_path_analyze(),
                            outfile = newOutfile,
                            nc34 = input$format,
-                           overwrite = TRUE)
+                           overwrite = TRUE,
+                           nc = nc_object_analyze())
     }else if (currentOperatorOption() == "years") {
       argumentList <- list(var = input$usedVariable,
                            year = input$years,
                            infile = nc_path_analyze(),
                            outfile = newOutfile,
                            nc34 = input$format,
-                           overwrite = TRUE)
+                           overwrite = TRUE,
+                           nc = nc_object_analyze())
     }else if (currentOperatorOption() == "times") {
       argumentList <- list(var = input$usedVariable,
                            hour_min = input$times,
                            infile = nc_path_analyze(),
                            outfile = newOutfile,
                            nc34 = input$format,
-                           overwrite = TRUE)
+                           overwrite = TRUE,
+                           nc = nc_object_analyze())
     }else if (currentOperatorOption() == "method") {
 
       # Select second input file depending on local or remote session
@@ -3230,7 +3258,9 @@ function(input, output, session) {
                            outfile = newOutfile,
                            method = input$method,
                            nc34 = input$format,
-                           overwrite = TRUE)
+                           overwrite = TRUE,
+                           # TODO Check that this is correct parameter name
+                           nc1 = nc_object_analyze())
     } else if (currentOperatorOption() == "file_select") {
       # Select second input file depending on local or remote session
       if (!isRunningLocally) {
@@ -3281,7 +3311,9 @@ function(input, output, session) {
                            infile2 = infile2,
                            outfile = newOutfile,
                            nc34 = input$format,
-                           overwrite = TRUE)
+                           overwrite = TRUE,
+                           # TODO Check that this is correct parameter name
+                           nc1 = nc_object_analyze())
     } else if (currentOperatorOption() == "file_selection") {
       if(infile2_analyze_value() == "" || second_variable_analyze() == 0){
         
@@ -3304,7 +3336,8 @@ function(input, output, session) {
         argumentList <- list(var1 = input$usedVariable, infile1 = nc_path_analyze(), 
                              var2 = second_variable_analyze(), infile2 = infile2_analyze_value(), 
                              outfile1 = newOutfile1, outfile2 = newOutfile2, 
-                             nc34 = input$format, overwrite = FALSE, verbose = FALSE)
+                             nc34 = input$format, overwrite = FALSE, verbose = FALSE,
+                             nc1 = nc_object_analyze())
       } else {
         plot_type_1d <<- operatorInput_value()
         plot_type_2d <<- operatorInput_value()
@@ -3731,7 +3764,8 @@ function(input, output, session) {
         temp_dir = monitor_climate_temp_dir,
         climate_dir = monitor_climate_temp_dir,
         attach = input$attachToExisting,
-        infile_attach = infile_attach
+        infile_attach = infile_attach,
+        nc = nc_object_analyze()
       )
 
       if (operatorInput_value() != "absolute_map") {

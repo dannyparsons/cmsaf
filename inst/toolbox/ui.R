@@ -158,7 +158,7 @@ fluidPage(
                                       ),
                                     shinyjs::hidden(tags$div(id = "spinner_prepare_nc_url_connect",
                                                              class = "spinner",
-                                                             tags$div(class = "spinner-title", h4("Connect to URL...")),
+                                                             tags$div(class = "spinner-title", h4("Connecting to URL...")),
                                                              tags$div(class = "double-bounce1"),
                                                              tags$div(class = "double-bounce2"))),
                                     shinyjs::hidden(tags$div(id = "spinner_prepare_nc_url_download",
