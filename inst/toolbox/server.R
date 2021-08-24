@@ -894,6 +894,7 @@ function(input, output, session) {
     shinyjs::disable("ncFileLocal_visualize")
     shinyjs::disable("useOutputFile_visualize")
     res <- try(nc_path_visualize(file.choose(new = TRUE)))
+    isolate(nc_object_visualize(NULL))
     if (class(res) != "try-error") {
       if (!endsWith(nc_path_visualize(), ".nc")) {
         isolate(nc_path_visualize(""))
@@ -913,6 +914,7 @@ function(input, output, session) {
     pth <- shinyFiles::parseFilePaths(volumes_output,input$ncFileRemote_visualize)
     req(nrow(pth) > 0)
     req(file.exists(pth$datapath))
+    nc_object_visualize(NULL)
     if (!endsWith(pth$datapath, ".nc")) {
       isolate(nc_path_visualize(""))
       wrong_file_modal(".nc")
@@ -925,8 +927,10 @@ function(input, output, session) {
   # If user chooses to take generated nc file update nc_path_visualize. (output file)
   observeEvent(input$useOutputFile_visualize, {
     nc_path_visualize(outputFilepath())
-    if (output_nc_is_url) visualize_nc_is_url <<- TRUE
-    if (!endsWith(nc_path_visualize(), ".nc") && !visualize_nc_is_url) {
+    # Set the nc object if it is not NULL
+    if (!is.null(outputFilenc())) nc_object_visualize(outputFilepath())
+    else isolate(nc_object_visualize(NULL))
+    if (!endsWith(nc_path_visualize(), ".nc") && is.null(nc_object_visualize())) {
       isolate(nc_path_visualize(""))
       wrong_file_modal(".nc")
     } else {
@@ -3794,16 +3798,19 @@ function(input, output, session) {
           nc_object_analyze(NULL)
           infile2_analyze_value(list_compare_data[[operator_Input2]])
           nc_path_visualize(list_compare_data[[operatorInput_value()]])
+          nc_object_visualize(NULL)
           nc_path_visualize_2(list_compare_data[[operator_Input2]])
         } else {
           if((endsWith(infile2_analyze_value(), ".nc"))) {
             nc_path_analyze(newOutfile)
             nc_object_analyze(NULL)
             nc_path_visualize(newOutfile)
+            nc_object_visualize(NULL)
           } else {
             nc_path_analyze(newOutfile)
             nc_object_analyze(NULL)
             nc_path_visualize(newOutfile)
+            nc_object_visualize(NULL)
           }
         }
       }
@@ -4032,25 +4039,32 @@ function(input, output, session) {
   # A function to read all required information from nc file
   # that's needed for the visualize options.
   # Also sets the correct image width and height.
-  get_visualize_options <- function(infile, var, infile2 = NULL, var2 = NULL) {
+  get_visualize_options <- function(infile, var, infile2 = NULL, var2 = NULL,
+                                    nc1 = NULL, nc2 = NULL) {
     # Open file and get data
-    id <- ncdf4::nc_open(infile)
+    if (!is.null(nc1)) id <- nc1
+    else id <- ncdf4::nc_open(infile)
     
     # Remap to regGrid if necessary
     file_info <- cmsafops:::check_dims(id)
-    ncdf4::nc_close(id)
+    if (is.null(nc)) ncdf4::nc_close(id)
     if (!file_info$isRegGrid) {
       remap_timestamp <- format(Sys.time(), "%Y%m%d%H%M%S", tz = "UTC")
       remap_name <- paste0("remap_", remap_timestamp, ".nc")
       outfile <- file.path(userDir, remap_name)
       # grid_filepath can be  found in global.R
-      cmsafops::remap(var, infile, grid_filepath, outfile, overwrite = TRUE)
+      cmsafops::remap(var, infile, grid_filepath, outfile, overwrite = TRUE,
+                      nc1 = nc1)
       infile <- outfile
+      # To prevent nc1 being used in place of outfile.
+      nc1 <- NULL
       nc_path_visualize(infile)
+      nc_object_visualize(NULL)
     }
     
-    if(!(is.null(infile2)) && (endsWith(infile2_analyze_value(), ".nc"))) {
-      id2 <- ncdf4::nc_open(infile2)
+    if((!is.null(nc2) || !is.null(infile2)) && (endsWith(infile2_analyze_value(), ".nc"))) {
+      if (!is.null(nc2)) id2 <- nc2
+      else id2 <- ncdf4::nc_open(infile2)
       
       lon2 <- ncdf4::ncvar_get(id2, "lon")
       lat2 <- ncdf4::ncvar_get(id2, "lat")
@@ -4061,7 +4075,8 @@ function(input, output, session) {
       }
     }
     # Open file and get data
-    id <- ncdf4::nc_open(infile)
+    if (!is.null(nc1)) id <- nc1
+    else id <- ncdf4::nc_open(infile)
 
     lon <- ncdf4::ncvar_get(id, "lon")
     lat <- ncdf4::ncvar_get(id, "lat")
@@ -4095,7 +4110,7 @@ function(input, output, session) {
     creator <- ifelse(creator_att$hasatt, creator_att$value, "-")
     copyrightText <- paste0("Data Source: ", creator)
 
-    ncdf4::nc_close(id)
+    if (is.null(nc1)) ncdf4::nc_close(id)
 
     # In HOAPS files problems can occur due to different sorted values
     # check data dimensions
@@ -4146,7 +4161,7 @@ function(input, output, session) {
       }
     }
     
-    if(!(is.null(infile2))) {   # Returning compare data plots for two files
+    if(!is.null(nc2) || !is.null(infile2)) {   # Returning compare data plots for two files
       #visualizeDataTimestep(getVariableData(1, id2, var2))
       if((endsWith(infile2_analyze_value(), ".nc"))) {
         date2 <- ncdf4::ncvar_get(id2, "time")
@@ -4172,7 +4187,7 @@ function(input, output, session) {
         
         ylabel <- paste0(varname2, " [", unit2, "]")
         
-        ncdf4::nc_close(id2)
+        if (is.null(nc2)) ncdf4::nc_close(id2)
       }
       visualizeDataMin(min(data, na.rm = TRUE))
       visualizeDataMax(max(data, na.rm = TRUE))
@@ -4246,7 +4261,9 @@ function(input, output, session) {
             lat = lat,
             lon = lon,
             fitted = fitted,
-            copyrightText = copyrightText
+            copyrightText = copyrightText,
+            nc = nc1,
+            nc2 = nc2
           )
         )
       } else {   # actual .RData and csv files
@@ -4284,7 +4301,9 @@ function(input, output, session) {
             lat = lat,
             lon = lon,
             fitted = fitted,
-            copyrightText = copyrightText
+            copyrightText = copyrightText,
+            nc = nc1,
+            nc2 = NULL
           )
         )
       }
@@ -4445,11 +4464,13 @@ function(input, output, session) {
         if(input$operatorInput_dropdown == "cmsaf.diff.absolute" || input$operatorInput_dropdown == "cmsaf.diff.relative") {
           nc_path_visualize_2("")   # reset path of second file
           nc_path_visualize(list_compare_data[[input$operatorInput_dropdown]])
+          nc_object_visualize(NULL)
         }
         else {
           operatorInput_file_2 <- paste0(input$operatorInput_dropdown, "2")
           nc_path_visualize_2(list_compare_data[[operatorInput_file_2]])
           nc_path_visualize(list_compare_data[[input$operatorInput_dropdown]])
+          nc_object_visualize(NULL)
         }
         actionVisualize(actionVisualize() + 1)
         shinyjs::show("spinner_visualize_compare_data", anim = TRUE, animType = "fade")
@@ -4527,10 +4548,11 @@ function(input, output, session) {
     } else
         shinyjs::hide("dropdown_compare_data")
 
-    id <- ncdf4::nc_open(nc_path_visualize())
+    if (!is.null(nc_object_visualize())) id <- nc_object_visualize()
+    else id <- ncdf4::nc_open(nc_path_visualize())
     vn <- names(id$var)
     dn <- names(id$dim)
-    ncdf4::nc_close(id)
+    if (is.null(nc_object_visualize())) ncdf4::nc_close(id)
 
     if (!("time" %in% dn)) {
       showModal(modalDialog(
@@ -4602,9 +4624,9 @@ function(input, output, session) {
       # Trying. If error go back to Visualize page.
       # Maybe visualizeVariables isn't loaded correctly second time?
       if(nc_path_visualize_2() != "") {
-        res <- try(visualizeVariables(get_visualize_options(nc_path_visualize(), vn, nc_path_visualize_2(), vn_2)))
+        res <- try(visualizeVariables(get_visualize_options(nc_path_visualize(), vn, nc_path_visualize_2(), vn_2, nc1 = nc_object_visualize())))
       } else {
-        res <- try(visualizeVariables(get_visualize_options(nc_path_visualize(), vn)))
+        res <- try(visualizeVariables(get_visualize_options(nc_path_visualize(), vn, nc1 = nc_object_visualize())))
       }
 
       if (class(res) == "try-error") {
@@ -5832,9 +5854,10 @@ function(input, output, session) {
   observeEvent(input$timestep, {
     req(is.element(input$timestep, visualizeVariables()$date.time))
     # Update the data according to the time step using the visualize nc file's id and previously calculated variable.
-    id <- ncdf4::nc_open(nc_path_visualize())
+    if (!is.null(nc_object_visualize())) id <- nc_object_visualize()
+    else id <- ncdf4::nc_open(nc_path_visualize())
     tmp <- getVariableData(which(visualizeVariables()$date.time == input$timestep), id, visualizeVariables()$vn)
-    ncdf4::nc_close(id)
+    if (is.null(nc_object_visualize())) ncdf4::nc_close(id)
 
     if (reversedDimensions$transpose) {
       tmp <- aperm(tmp, c(2, 1))
@@ -6201,7 +6224,8 @@ function(input, output, session) {
                                                       plot_grid = plot_grid,
                                                       grid_col = grid_col,
                                                       image_def = image_def,
-                                                      ihsf = ihsf))
+                                                      ihsf = ihsf,
+                                                      nc = nc_object_visualize()))
       } else {
         if(checkboxCompareData_dropdown() == "cmsaf.side.by.side"){
           req((visualizeVariables()$plot_type == "cmsaf.side.by.side"))
@@ -6442,7 +6466,8 @@ function(input, output, session) {
                                                                   plot_grid = plot_grid,
                                                                   grid_col = grid_col,
                                                                   image_def = image_def,
-                                                                  ihsf = ihsf)
+                                                                  ihsf = ihsf,
+                                                                  nc = nc_object_visualize())
                          in_plot <- res_plot$src
                        } else {
                          res_plot <- cmsafvis::render_plot(plot_rinstat = input$plot_rinstat,
@@ -6564,12 +6589,12 @@ function(input, output, session) {
   # File summaries
   output$summary1 <- renderPrint({
     req(nc_path_visualize())
-    cmsafops::ncinfo(nc_path_visualize())
+    cmsafops::ncinfo(nc_path_visualize(), nc = nc_object_visualize())
   })
 
   output$summary2 <- renderPrint({
     req(nc_path_visualize())
-    cmsafops::ncinfo(nc_path_visualize(), "m")
+    cmsafops::ncinfo(nc_path_visualize(), "m", nc = nc_object_visualize())
   })
 
   # About part
