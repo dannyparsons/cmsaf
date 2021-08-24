@@ -915,6 +915,7 @@ function(input, output, session) {
     shinyjs::disable("ncFileLocal_analyze")
     shinyjs::disable("useOutputFile_analyze")
     res <- try(nc_path_analyze(file.choose(new = TRUE)))
+    isolate(nc_object_analyze(NULL))
     if (class(res) != "try-error") {
       if (!endsWith(nc_path_analyze(), ".nc")) {
         isolate(nc_path_analyze(""))
@@ -936,6 +937,7 @@ function(input, output, session) {
     pth <- shinyFiles::parseFilePaths(volumes_output,input$ncFileRemote_analyze)
     req(nrow(pth) > 0)
     req(file.exists(pth$datapath))
+    isolate(nc_object_analyze(NULL))
     if (!endsWith(pth$datapath, ".nc")) {
       isolate(nc_path_analyze(""))
       wrong_file_modal(".nc")
@@ -3312,7 +3314,6 @@ function(input, output, session) {
                            outfile = newOutfile,
                            nc34 = input$format,
                            overwrite = TRUE,
-                           # TODO Check that this is correct parameter name
                            nc1 = nc_object_analyze())
     } else if (currentOperatorOption() == "file_selection") {
       if(infile2_analyze_value() == "" || second_variable_analyze() == 0){
@@ -3330,7 +3331,7 @@ function(input, output, session) {
       if(operatorInput_value() == "cmsaf.adjust.two.files") {
         two_files_compare_data_vis(1)
         time <- as.numeric(format(Sys.time(), "%H%M%S"))
-        newOutfile1 <- file.path(outputDir, paste0("match_data_", time, "_", basename(nc_path_analyze())))
+        newOutfile1 <- file.path(outputDir, paste0("match_data_", time, "_", cmsafops::get_basename(nc_path_analyze(), nc_object_analyze())))
         newOutfile2 <- file.path(outputDir, paste0("match_data_", time, "_", basename(infile2_analyze_value())))
     
         argumentList <- list(var1 = input$usedVariable, infile1 = nc_path_analyze(), 
@@ -3356,10 +3357,11 @@ function(input, output, session) {
         cmsafops::cmsaf.adjust.two.files(var1 = input$usedVariable, infile1 = nc_path_analyze(), 
                                          var2 = second_variable_analyze(), infile2 = infile2_analyze_value(), 
                                          outfile1 = temp_infile_one, outfile2 = temp_infile_two, 
-                                         nc34 = 4, overwrite = FALSE, verbose = FALSE)
+                                         nc34 = 4, overwrite = FALSE, verbose = FALSE, nc1 = nc_object_analyze())
         
         # set the new location of input files
         nc_path_analyze(temp_infile_one)
+        nc_object_analyze(NULL)
         infile2_analyze_value(temp_infile_two)
         
         argumentList <- list(var1 = input$usedVariable,
@@ -3369,7 +3371,9 @@ function(input, output, session) {
                              outfile = newOutfile,
                              nc34 = input$format,
                              overwrite = TRUE,
-                             verbose = TRUE)
+                             verbose = TRUE,
+                             # This is currently always NULL but included for consistency.
+                             nc1 = nc_object_analyze())
       }
     } else if(currentOperatorOption() == "compare_data") {
       if(infile2_analyze_value() == ""){
@@ -3396,7 +3400,9 @@ function(input, output, session) {
       }
       
       if((endsWith(infile2_analyze_value(), ".nc"))) {
-        analyze_file1_plot(nc_path_analyze())
+        # Set as the filename of the nc object if it is being used.
+        if (!is.null(nc_object_analyze())) analyze_file1_plot(nc_object_analyze()$filename)
+        else analyze_file1_plot(nc_path_analyze())
         analyze_file2_plot(infile2_analyze_value())
         
         temp_infile_one_sel <- file.path(tempdir(), "infile_one_tmp_sel.nc")
@@ -3412,7 +3418,7 @@ function(input, output, session) {
         cmsafops::selperiod(var = input$usedVariable, 
                             start = input$dateRange_compare_data[1], end = input$dateRange_compare_data[2], 
                             infile = nc_path_analyze(), outfile = temp_infile_one_sel, 
-                            nc34 = input$format, overwrite = TRUE)
+                            nc34 = input$format, overwrite = TRUE, nc = nc_object_analyze())
         cmsafops::selperiod(var = second_variable_analyze(), 
                             start = input$dateRange_compare_data[1], end = input$dateRange_compare_data[2], 
                             infile = infile2_analyze_value(), outfile = temp_infile_two_sel, 
@@ -3420,6 +3426,7 @@ function(input, output, session) {
         
         # set the new location of input files
         nc_path_analyze(temp_infile_one_sel)
+        nc_object_analyze(NULL)
         infile2_analyze_value(temp_infile_two_sel)
         
         if(operatorInput_value() == "cmsaf.diff.absolute"){
@@ -3440,7 +3447,8 @@ function(input, output, session) {
                                nc34 = input$format,
                                relative = FALSE,
                                overwrite = TRUE,
-                               toolbox = TRUE)
+                               toolbox = TRUE,
+                               nc1 = nc_object_analyze())
         } else if(operatorInput_value() == "cmsaf.diff.relative"){
           # set first operator of checkbox for dropdown visualize
           outfile_compare <- file.path(compare_temp_dir, paste0(input$usedVariable, "_", operatorInput_value(), time, ".nc"))
@@ -3459,7 +3467,8 @@ function(input, output, session) {
                                nc34 = input$format,
                                relative = TRUE,
                                overwrite = TRUE,
-                               toolbox = TRUE)
+                               toolbox = TRUE,
+                               nc1 = nc_object_analyze())
         } else {
           two_files_compare_data_vis(1)
           time <- as.numeric(format(Sys.time(), "%H%M%S"))
@@ -3485,7 +3494,8 @@ function(input, output, session) {
                                nc34 = input$format, 
                                overwrite= TRUE, 
                                verbose = FALSE,
-                               toolbox = TRUE)
+                               toolbox = TRUE,
+                               nc1 = nc_object_analyze())
         } 
   
         if(length(checkboxCompareData()) > 1) {
@@ -3509,7 +3519,8 @@ function(input, output, session) {
                                                nc34 = input$format,
                                                relative = FALSE,
                                                overwrite = TRUE,
-                                               toolbox = TRUE)
+                                               toolbox = TRUE,
+                                               nc1 = nc_object_analyze())
               fun <- get("cmsaf.diff", asNamespace("cmsafvis"))
             }
             else if(checkboxCompareData()[i] == "cmsaf.diff.relative"){
@@ -3528,7 +3539,8 @@ function(input, output, session) {
                                                nc34 = input$format,
                                                relative = TRUE,
                                                overwrite = TRUE,
-                                               toolbox = TRUE)
+                                               toolbox = TRUE,
+                                               nc1 = nc_object_analyze())
               fun <- get("cmsaf.diff", asNamespace("cmsafvis"))
             } else if(checkboxCompareData()[i] == "cmsaf.stats") {
               outfile_compare <- file.path(compare_temp_dir, paste0(input$usedVariable, "_", checkboxCompareData()[i], time, ".csv"))
@@ -3543,7 +3555,8 @@ function(input, output, session) {
                                                 infile2 = infile2_analyze_value(),
                                                 outfile = outfile_compare,
                                                 nc34 = input$format,
-                                                overwrite = TRUE)
+                                                overwrite = TRUE,
+                                                nc1 = nc_object_analyze())
               fun <- get("cmsaf.stats", asNamespace("cmsafops"))
               cmsaf_stats_enable(1)
             } else {
@@ -3570,14 +3583,16 @@ function(input, output, session) {
                                                 nc34 = input$format, 
                                                 overwrite= TRUE, 
                                                 verbose = FALSE,
-                                                toolbox = TRUE)
+                                                toolbox = TRUE,
+                                                nc1 = nc_object_analyze())
               fun <- get(checkboxCompareData()[i], asNamespace("cmsafvis"))
             } 
             try(do.call(fun, argumentList_compare_data))
           }
         }
       } else {
-        analyze_file1_plot(nc_path_analyze())
+        if (!is.null(nc_object_analyze())) analyze_file1_plot(nc_object_analyze()$filename)
+        else analyze_file1_plot(nc_path_analyze())
         analyze_file2_plot(infile2_analyze_value())
         
         if(operatorInput_value() %in% c("cmsaf.diff.absolute", "cmsaf.diff.relative")) {
@@ -3591,7 +3606,8 @@ function(input, output, session) {
           cmsafops::selperiod(var = input$usedVariable, 
                               start = input$dateRange_compare_data[1], end = input$dateRange_compare_data[2], 
                               infile = nc_path_analyze(), outfile = outfile_compare, 
-                              nc34 = input$format, overwrite = TRUE)
+                              nc34 = input$format, overwrite = TRUE,
+                              nc = nc_object_analyze())
         } else {
           two_files_compare_data_vis(1)
           time <- as.numeric(format(Sys.time(), "%H%M%S"))
@@ -3607,7 +3623,8 @@ function(input, output, session) {
           cmsafops::selperiod(var = input$usedVariable, 
                               start = input$dateRange_compare_data[1], end = input$dateRange_compare_data[2], 
                               infile = nc_path_analyze(), outfile = newOutfile1, 
-                              nc34 = input$format, overwrite = TRUE)
+                              nc34 = input$format, overwrite = TRUE,
+                              nc = nc_object_analyze())
         }
         
         if(length(checkboxCompareData()) > 1) {
@@ -3623,7 +3640,8 @@ function(input, output, session) {
               cmsafops::selperiod(var = input$usedVariable, 
                                   start = input$dateRange_compare_data[1], end = input$dateRange_compare_data[2], 
                                   infile = nc_path_analyze(), outfile = outfile_compare, 
-                                  nc34 = input$format, overwrite = TRUE)
+                                  nc34 = input$format, overwrite = TRUE,
+                                  nc = nc_object_analyze())
             } else if(checkboxCompareData()[i] == "cmsaf.diff.relative") {
               outfile_compare <- file.path(compare_temp_dir, paste0(input$usedVariable, "_", checkboxCompareData()[i], time, ".nc"))
               if (outfile_compare == nc_path_analyze()) {
@@ -3635,7 +3653,8 @@ function(input, output, session) {
               cmsafops::selperiod(var = input$usedVariable, 
                                   start = input$dateRange_compare_data[1], end = input$dateRange_compare_data[2], 
                                   infile = nc_path_analyze(), outfile = outfile_compare, 
-                                  nc34 = input$format, overwrite = TRUE)
+                                  nc34 = input$format, overwrite = TRUE,
+                                  nc = nc_object_analyze())
             } else if(checkboxCompareData()[i] == "cmsaf.stats") {
               outfile_compare <- file.path(compare_temp_dir, paste0(input$usedVariable, "_", checkboxCompareData()[i], time, ".csv"))
               if (outfile_compare == nc_path_analyze()) {
@@ -3649,7 +3668,8 @@ function(input, output, session) {
                 infile = nc_path_analyze(),
                 data_station = station_data_compare(),
                 outfile = outfile_compare,
-                overwrite = TRUE
+                overwrite = TRUE,
+                nc = nc_object_analyze()
               )
               cmsaf_stats_enable(1)
             } else {
@@ -3665,7 +3685,8 @@ function(input, output, session) {
               cmsafops::selperiod(var = input$usedVariable, 
                                   start = input$dateRange_compare_data[1], end = input$dateRange_compare_data[2], 
                                   infile = nc_path_analyze(), outfile = newOutfile1, 
-                                  nc34 = input$format, overwrite = TRUE)
+                                  nc34 = input$format, overwrite = TRUE,
+                                  nc = nc_object_analyze())
             }
           }
         }
@@ -3842,15 +3863,18 @@ function(input, output, session) {
         if(two_files_compare_data_vis() == 1){   # two files to visualize 
           operator_Input2 <- paste0(operatorInput_value(), "2")
           nc_path_analyze(list_compare_data[[operatorInput_value()]])
+          nc_object_analyze(NULL)
           infile2_analyze_value(list_compare_data[[operator_Input2]])
           nc_path_visualize(list_compare_data[[operatorInput_value()]])
           nc_path_visualize_2(list_compare_data[[operator_Input2]])
         } else {
           if((endsWith(infile2_analyze_value(), ".nc"))) {
             nc_path_analyze(newOutfile)
+            nc_object_analyze(NULL)
             nc_path_visualize(newOutfile)
           } else {
             nc_path_analyze(newOutfile)
+            nc_object_analyze(NULL)
             nc_path_visualize(newOutfile)
           }
         }
@@ -4019,7 +4043,8 @@ function(input, output, session) {
       
       if(currentOperatorOption() == "compare_data"){
         list_date_range <- cmsafops::calc_overlapping_time(var1 = input$usedVariable, infile1 = nc_path_analyze(), 
-                                                           var2 = second_variable_analyze(), infile2 = infile2_analyze_value())
+                                                           var2 = second_variable_analyze(), infile2 = infile2_analyze_value(),
+                                                           nc1 = nc_object_analyze())
         
         # Show date range of second file
         start_date_reac(list_date_range[[1]])
@@ -4047,7 +4072,8 @@ function(input, output, session) {
       
       if(currentOperatorOption() == "compare_data") {
         list_date_range <- cmsafops::calc_overlapping_time(var1 = input$usedVariable, infile1 = nc_path_analyze(), 
-                                                           var2 = second_variable_analyze(), infile2 = infile2_analyze_value())
+                                                           var2 = second_variable_analyze(), infile2 = infile2_analyze_value(),
+                                                           nc2 = nc_object_analyze())
         
         # Show date range of second file
         start_date_reac(list_date_range[[1]])
@@ -4705,8 +4731,10 @@ function(input, output, session) {
                           value = visualizeVariables()$varname2)
               })
               
-              pattern <- "[^\\/]+(\\.nc)$" # regular exp. to extract filenames
-              regex1 <- regmatches( analyze_file1_plot(), regexpr(pattern, analyze_file1_plot()))
+              # pattern <- "[^\\/]+(\\.nc)$" # regular exp. to extract filenames
+              # regex1 <- regmatches( analyze_file1_plot(), regexpr(pattern, analyze_file1_plot()))
+              # Replace with cmsafops::get_basename() which also accounts for URLs
+              regex1 <- cmsafops::get_basename(analyze_file1_plot())
               value_text2 <- regex1
               regex2 <- regmatches(analyze_file2_plot(), regexpr(pattern, analyze_file2_plot()))
               output$subtitle_text2 <- renderUI({
@@ -4859,8 +4887,10 @@ function(input, output, session) {
               shinyjs::hide("dropdown_station_number")
             }
             
-            pattern <- "[^\\/]+(\\.nc)$" # regular exp. to extract filenames
-            regex1 <- regmatches( analyze_file1_plot(), regexpr(pattern, analyze_file1_plot()))
+            # pattern <- "[^\\/]+(\\.nc)$" # regular exp. to extract filenames
+            # regex1 <- regmatches( analyze_file1_plot(), regexpr(pattern, analyze_file1_plot()))
+            # Replace with cmsafops::get_basename() which also accounts for URLs
+            regex1 <- cmsafops::get_basename(analyze_file1_plot())
             
             if((endsWith(infile2_analyze_value(), ".csv"))){
               pattern <- "[^\\/]+(\\.csv)$" # regular exp. to extract filenames
@@ -4904,8 +4934,10 @@ function(input, output, session) {
             shinyjs::hide("date_dropdown_visualize")
             shinyjs::hide("dropdown_station_number")
             
-            pattern <- "[^\\/]+(\\.nc)$" # regular exp. to extract filenames
-            regex1 <- regmatches( analyze_file1_plot(), regexpr(pattern, analyze_file1_plot()))
+            # pattern <- "[^\\/]+(\\.nc)$" # regular exp. to extract filenames
+            # regex1 <- regmatches( analyze_file1_plot(), regexpr(pattern, analyze_file1_plot()))
+            # Replace with cmsafops::get_basename() which also accounts for URLs
+            regex1 <- cmsafops::get_basename(analyze_file1_plot())
             if((endsWith(infile2_analyze_value(), ".csv"))){
               pattern <- "[^\\/]+(\\.csv)$" # regular exp. to extract filenames
             }
@@ -4970,8 +5002,10 @@ function(input, output, session) {
             })
             
             if(checkboxCompareData_dropdown() == "cmsaf.scatter") {
-              pattern <- "[^\\/]+(\\.nc)$" # regular exp. to extract filenames
-              regex1 <- regmatches( analyze_file1_plot(), regexpr(pattern, analyze_file1_plot()))
+              # pattern <- "[^\\/]+(\\.nc)$" # regular exp. to extract filenames
+              # regex1 <- regmatches( analyze_file1_plot(), regexpr(pattern, analyze_file1_plot()))
+              # Replace with cmsafops::get_basename() which also accounts for URLs
+              regex1 <- cmsafops::get_basename(analyze_file1_plot())
               if((endsWith(infile2_analyze_value(), ".csv"))){
                 pattern <- "[^\\/]+(\\.csv)$" # regular exp. to extract filenames
               }
@@ -4996,8 +5030,10 @@ function(input, output, session) {
             } else if(checkboxCompareData_dropdown() == "cmsaf.hist"){
                 shinyjs::hide("dropdown_station_number")
               
-              pattern <- "[^\\/]+(\\.nc)$" # regular exp. to extract filenames
-              regex1 <- regmatches( analyze_file1_plot(), regexpr(pattern, analyze_file1_plot()))
+              # pattern <- "[^\\/]+(\\.nc)$" # regular exp. to extract filenames
+              # regex1 <- regmatches( analyze_file1_plot(), regexpr(pattern, analyze_file1_plot()))
+              # Replace with cmsafops::get_basename() which also accounts for URLs
+              regex1 <- cmsafops::get_basename(analyze_file1_plot())
               if((endsWith(infile2_analyze_value(), ".csv"))){
                 pattern <- "[^\\/]+(\\.csv)$" # regular exp. to extract filenames
               }
