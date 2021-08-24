@@ -162,78 +162,6 @@ valid_nc_url <- function(x) {
   }
 }
 
-# A copy of cmsafops::ncinfo() but modified 
-# to allow the input to be an nc object created by nc_open().
-# This is useful for URL inputs to avoid connecting to the URL again.
-ncinfo_from_nc <- function (nc, info = "s", verbose = FALSE) {
-  TIME_NAMES <- cmsafops:::TIME_NAMES
-  UNDEFINED <- cmsafops:::UNDEFINED
-  ATTR_NAMES <- cmsafops:::ATTR_NAMES
-
-  t_name <- TIME_NAMES$DEFAULT
-  t_units <- UNDEFINED
-  nc_in <- nc
-  dimnames <- names(nc_in$dim)
-  varnames <- names(nc_in$var)
-  if (info == "l") {
-    cat(utils::str(nc_in), "\n")
-    return(invisible(nc_in))
-  }
-  if (info == "m") {
-    print(nc_in)
-  }
-  if (info == "s") {
-    cat("The file:", nc_in$filename, "contains:", 
-        "\n")
-    if (length(varnames) == 1) {
-      cat("\n", "Variable:", sep = "", 
-          "\n")
-      cat(varnames[1], "\n")
-    }
-    else {
-      cat("\n", "Variables:", sep = "", 
-          "\n")
-      for (i in seq_along(varnames)) {
-        cat(varnames[i], "\n")
-      }
-    }
-    for (i in seq_along(dimnames)) {
-      sn <- ncdf4::ncatt_get(nc_in, dimnames[i], ATTR_NAMES$STANDARD_NAME)
-      if (length(sn) > 0) {
-        sn <- sn$value
-        if (sn == TIME_NAMES$DEFAULT) 
-          t_name <- dimnames[i]
-      }
-    }
-    cat("\n", "With following dimensions:", sep = "", 
-        "\n")
-    for (i in seq_along(dimnames)) {
-      if (dimnames[i] == t_name) {
-        for (j in seq_along(dimnames)) {
-          if (t_name %in% dimnames) {
-            attnames <- names(nc_in$dim[[i]])
-            if (ATTR_NAMES$UNITS %in% attnames) {
-              t_units <- ncdf4::ncatt_get(nc_in, t_name, ATTR_NAMES$UNITS)$value
-            }
-          }
-        }
-        time1 <- ncdf4::ncvar_get(nc_in, TIME_NAMES$DEFAULT)
-        date.time <- as.Date(cmsafops::get_time(t_units, time1))
-        cat("time with length ", length(time1), 
-            " (range ", as.character(min(date.time)), 
-            " to ", as.character(max(date.time)), 
-            ")", sep = "", "\n")
-      }
-      else {
-        cat(dimnames[i], " with length ", nc_in$dim[[i]]$len, 
-            " (range ", min(nc_in$dim[[i]]$vals), 
-            " to ", max(nc_in$dim[[i]]$vals), ")", 
-            sep = "", "\n")
-      }
-    }
-  }
-}
-
 function(input, output, session) {
   #### Preparation and session set up ####
   # TODO: Setting the maximum request size. WARNING: NOT SURE WHAT'S A GOOD VALUE FOR THIS
@@ -790,7 +718,7 @@ function(input, output, session) {
     if (isTRUE(valid_url)) {
       if (!is.null(nc)) {
         output$ncurlShortInfo <- renderPrint({
-          ncinfo_from_nc(nc)
+          cmsafops::ncinfo(nc = nc)
         })
         shinyjs::show(id = "nc_url_file_info")
         shinyjs::show(id = "nc_url_analyze")
